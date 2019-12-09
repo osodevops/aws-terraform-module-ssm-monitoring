@@ -22,7 +22,7 @@
     # metricbeat config
     metricbeat_config_dir: '/etc/metricbeat'
     metricbeat_config_file: '{{ metricbeat_config_dir }}/metricbeat.yml'
-    metricbeat_xpack_config_dir: '{{ metricbeat_config_dir | trim }}/x-pack'
+    metricbeat_xpack_config_dir: '{{ metricbeat_config_dir }}/x-pack'
   tasks:
   - name: Download metricbeat rpm package
     get_url:
