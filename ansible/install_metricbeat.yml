@@ -1,0 +1,43 @@
+---
+- hosts: 127.0.0.1
+  gather_facts: true
+  vars:
+    # Run as root
+    metricbeat_run_as_root: true
+    # metricbeat package
+    package_ver: '7.5.0'
+    package_arch: 'x86_64'
+    package_ext: 'rpm'
+    url_timeout: 30
+    metricbeat_package_url: 'https://artifacts.elastic.co/downloads/beats/metricbeat/metricbeat-{{ package_ver }}-{{ package_arch }}.{{ package_ext }}'
+    metricbeat_package: '/tmp/metric_beat.rpm'
+    # metricbeat bin
+    metricbeat_bin_dir: '/usr/share/metricbeat/bin'
+    metricbeat_exe: '{{ metricbeat_bin_dir }}/metricbeat'
+    metricbeat_plugin_exe: '{{ metricbeat_bin_dir }}/metricbeat-plugin'
+    metricbeat_certgen_exe: '{{ metricbeat_bin_dir }}/x-pack/certgen'
+    # metricbeat logs
+    metricbeat_log_dir: '/var/log/metricbeat'
+    metricbeat_log_file: '{{ metricbeat_log_dir }}/metricbeat.log'
+    # metricbeat config
+    metricbeat_config_dir: '/etc/metricbeat'
+    metricbeat_config_file: '{{ metricbeat_config_dir }}/metricbeat.yml'
+    metricbeat_xpack_config_dir: '{{ metricbeat_config_dir | trim }}/x-pack'
+  tasks:
+  - name: Download metricbeat rpm package
+    get_url:
+      url: '{{ metricbeat_package_url }}'
+      dest: '{{ metricbeat_package }}'
+      timeout: '{{ url_timeout }}'
+    tags: package_metricbeat
+    register: metricbeat_get_url
+    until: metricbeat_get_url is not failed
+    retries: 2
+    delay: 30
+
+  - name: Install metricbeat rpm package
+    yum:
+      name: '{{ metricbeat_package }}'
+      state: present
+    become: true
+    tags: install_metricbeat
