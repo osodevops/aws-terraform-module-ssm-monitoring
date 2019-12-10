@@ -8,6 +8,10 @@
 data "template_file" "install_metricbeat_ansible_playbook" {
   template = file("${path.module}/ansible/install_metricbeat.yml")
 
+  vars = {
+    elasticsearch_host = var.elasticsearch_host
+    elasticsearch_port = var.elasticsearch_port
+  }
 }
 
 resource "aws_ssm_association" "install_metricbeat_ansible_playbook" {
