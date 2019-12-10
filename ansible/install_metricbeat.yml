@@ -93,6 +93,7 @@
     service:
       name: metricbeat
       state: started
+      enabled: yes
     become: true
 
   - name: Save original metricbeat configuration
