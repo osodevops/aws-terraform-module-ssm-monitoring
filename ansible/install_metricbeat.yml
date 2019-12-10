@@ -2,42 +2,138 @@
 - hosts: 127.0.0.1
   gather_facts: true
   vars:
-    # Run as root
-    metricbeat_run_as_root: true
     # metricbeat package
-    package_ver: '7.5.0'
-    package_arch: 'x86_64'
-    package_ext: 'rpm'
+    package_ver: "6.3.0"
+    # tar package
     url_timeout: 30
-    metricbeat_package_url: 'https://artifacts.elastic.co/downloads/beats/metricbeat/metricbeat-{{ package_ver }}-{{ package_arch }}.{{ package_ext }}'
-    metricbeat_package: '/tmp/metric_beat.rpm'
+    metricbeat_package_url: https://artifacts.elastic.co/downloads/beats/metricbeat/metricbeat-oss-{{ package_ver }}-linux-x86_64.tar.gz
+    metricbeat_package: "metricbeat-oss-{{ package_ver }}-linux-x86_64.tar.gz"
     # metricbeat bin
-    metricbeat_bin_dir: '/usr/share/metricbeat/bin'
-    metricbeat_exe: '{{ metricbeat_bin_dir }}/metricbeat'
-    metricbeat_plugin_exe: '{{ metricbeat_bin_dir }}/metricbeat-plugin'
-    metricbeat_certgen_exe: '{{ metricbeat_bin_dir }}/x-pack/certgen'
+    metricbeat_install_dir: "/etc/metricbeat"
     # metricbeat logs
-    metricbeat_log_dir: '/var/log/metricbeat'
-    metricbeat_log_file: '{{ metricbeat_log_dir }}/metricbeat.log'
+    metricbeat_log_dir: "/var/log/metricbeat"
+    metricbeat_log_file: "{{ metricbeat_log_dir }}/metricbeat.log"
     # metricbeat config
-    metricbeat_config_dir: '/etc/metricbeat'
-    metricbeat_config_file: '{{ metricbeat_config_dir }}/metricbeat.yml'
-    metricbeat_xpack_config_dir: '{{ metricbeat_config_dir }}/x-pack'
+    metricbeat_config_dir: "/etc/metricbeat"
+    metricbeat_config_file: "{{ metricbeat_config_dir }}/metricbeat.yml"
   tasks:
-  - name: Download metricbeat rpm package
+  - name: Download metricbeat tar package
     get_url:
-      url: '{{ metricbeat_package_url }}'
-      dest: '{{ metricbeat_package }}'
-      timeout: '{{ url_timeout }}'
-    tags: package_metricbeat
+      url: "{{ metricbeat_package_url }}"
+      dest: "/tmp/{{ metricbeat_package }}"
+      timeout: "{{ url_timeout }}"
     register: metricbeat_get_url
     until: metricbeat_get_url is not failed
     retries: 2
     delay: 30
 
-  - name: Install metricbeat rpm package
-    yum:
-      name: '{{ metricbeat_package }}'
-      state: present
+  - name: Create a metricbeat install directory if it does not exist
+    file:
+      path: "{{ metricbeat_install_dir }}/"
+      state: directory
+      mode: "0755"
+
+  - name: Create data directory
+    file: 
+      path: /var/lib/metricbeat/ 
+      state: directory
+  
+  - name: Create log directory
+    file: 
+      path: /var/log/metricbeat/ 
+      state: directory
+
+  - name: Install metricbeat tar package
+    unarchive:
+      src: "/tmp/{{ metricbeat_package }}"
+      dest: "{{ metricbeat_install_dir }}/"
+      remote_src: True
+
+  - name: Check if modules directory exists
+    stat:
+      path: "{{ metricbeat_install_dir }}/modules.d"
+    register: p
+
+  - name: Change permissions on modules directory
+    file:
+      path: "{{ metricbeat_install_dir }}/modules.d"
+      owner: root
+      group: root
+      recurse: true
     become: true
-    tags: install_metricbeat
+    when: p.stat.isdir is defined and p.stat.isdir
+
+  - name: Symlink metricbeat to bin dir
+    file:
+      src: "{{ metricbeat_install_dir }}/metricbeat"
+      dest: /usr/bin/metricbeat
+      state: link
+
+  - name: Create service for metricbeat
+    copy:
+      dest: /etc/.my.cnf
+      owner: root
+      mode: 0600
+      content: |
+        [Unit]
+        Description=Metricbeat is a lightweight shipper for metrics.
+        Documentation=https://www.elastic.co/products/beats/metricbeat
+        Wants=network-online.target
+        After=network-online.target
+        [Service]
+        ExecStart=/usr/bin/metricbeat -c {{ metricbeat_install_dir }}/metricbeat.yml -path.config {{ metricbeat_install_dir }} -path.data /var/lib/metricbeat -path.logs /var/log/metricbeat
+        Restart=always
+        [Install]
+        WantedBy=multi-user.target
+
+  - name: Save original metricbeat configuration
+    copy:
+      src: "{{ metricbeat_config_file }}"
+      dest: "{{ metricbeat_config_file }}.org"
+      remote_src: True
+      force: no
+    become: true
+
+  - name: Change metricbeat configuration file owner to root
+    file:
+      path: "{{ metricbeat_config_file }}"
+      owner: root
+      group: root
+    become: true
+
+  - name: Metricbeat configuration - append
+    lineinfile:
+      path: "{{ metricbeat_config_file }}"
+      insertafter: EOF
+      line: "{{ config_item }}"
+    with_items: "{{ metricbeat_config_params  }}"
+    loop_control:
+      loop_var: config_item
+    become: true
+    when: metricbeat_config_params_file is not defined and
+          metricbeat_config_params is defined
+
+  - name: Metricbeat configuration - new file
+    copy:
+      src: "{{ metricbeat_config_params_file }}"
+      dest: "{{ metricbeat_config_file }}"
+    become: true
+    when: metricbeat_config_params_file is defined
+
+  - name: Metricbeat configuration - append internal
+    block:
+      - name: Set network host
+        set_fact:
+          internal_metricbeat_config_params: >
+            output.elasticsearch:
+              hosts: ["{{ current_host_ip }}:{{ elasticsearch_port }}"]
+            setup.kibana:
+              host: "{{ current_host_ip }}:{{ kibana_port }}"
+      - name: Add metricbeat configuration parameters
+        blockinfile:
+          path: "{{ metricbeat_config_file }}"
+          marker: "# {mark} ANSIBLE MANAGED BLOCK METRICBEAT PARAMETERS"
+          insertafter: EOF
+          content: "{{ internal_metricbeat_config_params }}"
+        become: true
+    when: metricbeat_config_params_strict is not defined or not metricbeat_config_params_strict
