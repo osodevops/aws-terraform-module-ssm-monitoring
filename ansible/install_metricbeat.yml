@@ -16,6 +16,9 @@
     # metricbeat config
     metricbeat_config_dir: "/etc/metricbeat"
     metricbeat_config_file: "{{ metricbeat_config_dir }}/metricbeat.yml"
+    # Elasticsearch
+    elasticsearch_host: ${elasticsearch_host}
+    elasticsearch_port: ${elasticsearch_port}
   tasks:
   - name: Download metricbeat tar package
     get_url:
@@ -71,7 +74,7 @@
 
   - name: Create service for metricbeat
     copy:
-      dest: /etc/.my.cnf
+      dest: /etc/systemd/system/metricbeat.service
       owner: root
       mode: 0600
       content: |
@@ -85,6 +88,12 @@
         Restart=always
         [Install]
         WantedBy=multi-user.target
+
+  - name: Start metricbeat
+    service:
+      name: metricbeat
+      state: started
+    become: true
 
   - name: Save original metricbeat configuration
     copy:
@@ -126,9 +135,7 @@
         set_fact:
           internal_metricbeat_config_params: >
             output.elasticsearch:
-              hosts: ["{{ current_host_ip }}:{{ elasticsearch_port }}"]
-            setup.kibana:
-              host: "{{ current_host_ip }}:{{ kibana_port }}"
+              hosts: ["{{ elasticsearch_host }}:{{ elasticsearch_port }}"]
       - name: Add metricbeat configuration parameters
         blockinfile:
           path: "{{ metricbeat_config_file }}"
@@ -137,3 +144,9 @@
           content: "{{ internal_metricbeat_config_params }}"
         become: true
     when: metricbeat_config_params_strict is not defined or not metricbeat_config_params_strict
+
+  - name: Restart metricbeat
+    service:
+      name: metricbeat
+      state: restarted
+    become: true
